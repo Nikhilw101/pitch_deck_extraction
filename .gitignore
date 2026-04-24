@@ -1,0 +1,44 @@
+# =========================
+# Monorepo-wide ignores
+# =========================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.cursor/
+*.log
+
+# =========================
+# Backend (Rust) ignores
+# =========================
+/target/
+backend/target/
+backend/.env
+backend/**/*.rs.bk
+
+# Backend runtime/generated artifacts
+outputs/
+vector_index*.hnsw.*
+vector_index*.meta.json
+faiss_index.bin*
+
+# Backend test-generated artifacts
+backend/tests/smoke_test_upload_output.json
+backend/tests/smoke_test_search_output.json
+backend/tests/smoke_phase1_output.json
+backend/tests/smoke_test_output.json
+backend/tests/smoke_test_output_pptx.json
+backend/tests/smoke_test_results.json
+backend/tests/tmp_full_smoke_index*
+backend/tests/tmp_smoke_upload_index*
+backend/tests/tmp_full_api_smoke_index*
+backend/tests/tmp_smoke_index*
+backend/tests/smoke_full_api_report.json
+test_output*.txt
+smoke_*.txt
+
+# =========================
+# Frontend (Vite/React) ignores
+# =========================
+frontend/pitch-deck-ui/node_modules/
+frontend/pitch-deck-ui/dist/
