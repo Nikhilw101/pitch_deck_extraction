@@ -335,7 +335,7 @@ Return valid JSON ONLY, no other text:
     {{ "type": "market_growth|traction|team_strength|...", "description": "<verbatim quote from text>", "confidence": <float> }}
   ],
   "red_flags": [
-    {{ "type": "risk_factor|...", "description": "<verbatim quote from text>", "severity": "low|medium|high|critical" }}
+    {{ "type": "risk_factor|...", "description": "<verbatim quote from text>", "severity": "low|medium|high|critical", "evidence_text": "<exact supporting quote>", "evidence_slide_number": <number> }}
   ]
 }}
 

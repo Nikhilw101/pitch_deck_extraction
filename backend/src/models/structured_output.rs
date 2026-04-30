@@ -65,6 +65,21 @@ pub struct RedFlag {
     /// "low" | "medium" | "high" | "critical"
     pub severity: String,
     pub section: String,
+    /// Exact supporting quote/snippet from source slide text
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_text: Option<String>,
+    /// Slide number where evidence was found
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_slide_number: Option<usize>,
+    /// True when evidence_text is found in section text
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_confirmed: Option<bool>,
+    /// Which subsystem produced this flag (llm_structuring|llm_signals|rule_engine|derived_analysis)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Human-readable details explaining why this flag was raised
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_details: Option<String>,
 }
 
 // ── Scoring ───────────────────────────────────────────────────────────────────

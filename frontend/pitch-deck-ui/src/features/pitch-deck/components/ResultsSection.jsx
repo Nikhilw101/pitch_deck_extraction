@@ -16,6 +16,21 @@ function safeNumber(value) {
   return value
 }
 
+function sourceLabel(source) {
+  switch (source) {
+    case 'llm_structuring':
+      return 'LLM Structuring'
+    case 'llm_signals':
+      return 'Signal Extractor'
+    case 'rule_engine':
+      return 'Rule Engine'
+    case 'derived_analysis':
+      return 'Derived Analysis'
+    default:
+      return source || 'Unknown'
+  }
+}
+
 function DeckReport({ report }) {
   if (!report) {
     return (
@@ -198,6 +213,28 @@ function DeckReport({ report }) {
                                     <Badge variant="secondary">Severity: {f?.severity || '—'}</Badge>
                                   </div>
                                   <div className="text-slate-300">{f?.description || ''}</div>
+                                  {f?.evidence_text && (
+                                    <div className="rounded-md border border-rose-300/20 bg-rose-950/30 p-2 text-xs text-rose-100">
+                                      Proof: "{f.evidence_text}"
+                                    </div>
+                                  )}
+                                  {f?.reason_details && (
+                                    <div className="text-xs text-slate-300">
+                                      Reason: {f.reason_details}
+                                    </div>
+                                  )}
+                                  {f?.source && (
+                                    <div className="text-xs text-slate-400">Source: {sourceLabel(f.source)}</div>
+                                  )}
+                                  <div className="text-xs text-slate-400">
+                                    Confirmation:{' '}
+                                    {f?.evidence_confirmed === true
+                                      ? 'Verified from source text'
+                                      : f?.evidence_confirmed === false
+                                        ? 'Not verified from source text'
+                                        : 'Not available'}
+                                    {f?.evidence_slide_number ? ` | Slide ${f.evidence_slide_number}` : ''}
+                                  </div>
                                 </CardContent>
                               </Card>
                             ))}

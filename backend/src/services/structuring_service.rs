@@ -3,6 +3,7 @@ use crate::models::section_model::GroupedDeck;
 use crate::models::structured_output::{InvestmentSignal, RedFlag, StructuredSectionData};
 use crate::services::llm_service::LlmService;
 use futures::future::join_all;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tracing::{info, warn};
@@ -128,11 +129,15 @@ impl StructuringService {
                                     .filter_map(|item| {
                                         let obj = item.as_object()?;
                                         let signal_type = obj.get("type")?.as_str()?.to_string();
-                                        let description = obj
+                                        let mut description = obj
                                             .get("description")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
+                                            .trim()
                                             .to_string();
+                                        if description.is_empty() {
+                                            description = "Signal reported by model".to_string();
+                                        }
                                         let confidence = obj
                                             .get("confidence")
                                             .and_then(|v| v.as_f64())
@@ -148,7 +153,7 @@ impl StructuringService {
                             })
                             .unwrap_or_default();
 
-                        let section_red_flags: Vec<RedFlag> = map
+                        let mut section_red_flags: Vec<RedFlag> = map
                             .get("red_flags")
                             .and_then(|v| v.as_array())
                             .map(|arr| {
@@ -156,26 +161,49 @@ impl StructuringService {
                                     .filter_map(|item| {
                                         let obj = item.as_object()?;
                                         let flag_type = obj.get("type")?.as_str()?.to_string();
-                                        let description = obj
+                                        let mut description = obj
                                             .get("description")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
+                                            .trim()
                                             .to_string();
+                                        if description.is_empty() {
+                                            description = format!("Flag reported by model: {}", flag_type);
+                                        }
                                         let severity = obj
                                             .get("severity")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("medium")
                                             .to_string();
+                                        let evidence_text = obj
+                                            .get("evidence_text")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.trim().to_string())
+                                            .filter(|s| !s.is_empty());
+                                        let evidence_slide_number = obj
+                                            .get("evidence_slide_number")
+                                            .and_then(|v| v.as_u64())
+                                            .map(|n| n as usize);
                                         Some(RedFlag {
                                             flag_type,
                                             description,
                                             severity,
                                             section: section_name.clone(),
+                                            evidence_text,
+                                            evidence_slide_number,
+                                            evidence_confirmed: None,
+                                            source: Some("llm_structuring".to_string()),
+                                            reason_details: None,
                                         })
                                     })
                                     .collect()
                             })
                             .unwrap_or_default();
+                        Self::normalize_and_dedup_red_flags(
+                            &mut section_red_flags,
+                            &section_text,
+                            &data_value,
+                        );
 
                         // Implement Post-Extraction Hallucination Filter
                         let mut final_data_value = data_value.clone();
@@ -298,6 +326,87 @@ impl StructuringService {
         }
     }
 
+    fn normalize_and_dedup_red_flags(
+        red_flags: &mut Vec<RedFlag>,
+        section_text: &str,
+        section_data: &serde_json::Value,
+    ) {
+        let section_text_lower = section_text.to_lowercase();
+        let mut seen = HashSet::new();
+        let mut deduped = Vec::with_capacity(red_flags.len());
+        let missing_fields = Self::missing_or_empty_fields(section_data);
+
+        for mut flag in red_flags.drain(..) {
+            let normalized_type = flag.flag_type.trim().to_lowercase();
+            let normalized_desc = flag.description.trim().to_lowercase();
+            let key = format!("{normalized_type}|{normalized_desc}");
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.insert(key);
+
+            let evidence = flag
+                .evidence_text
+                .as_ref()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                // Non-strict fallback: always include a source string.
+                .unwrap_or_else(|| {
+                    if !flag.description.trim().is_empty() {
+                        flag.description.trim().to_string()
+                    } else if !missing_fields.is_empty() {
+                        format!("Missing structured fields: {}", missing_fields.join(", "))
+                    } else {
+                        format!("Derived from model output for {}", flag.flag_type)
+                    }
+                });
+            let evidence_confirmed = section_text_lower.contains(&evidence.to_lowercase());
+            flag.evidence_text = Some(evidence);
+            flag.evidence_confirmed = Some(evidence_confirmed);
+            if flag.reason_details.is_none() {
+                flag.reason_details = if !missing_fields.is_empty() {
+                    Some(format!(
+                        "Flag likely triggered by missing/empty fields: {}",
+                        missing_fields.join(", ")
+                    ))
+                } else {
+                    Some("Flag extracted by structuring LLM analysis.".to_string())
+                };
+            }
+            if flag.source.is_none() {
+                flag.source = Some("llm_structuring".to_string());
+            }
+
+            deduped.push(flag);
+        }
+
+        *red_flags = deduped;
+    }
+
+    fn missing_or_empty_fields(section_data: &serde_json::Value) -> Vec<String> {
+        let mut out = Vec::new();
+        let Some(obj) = section_data.as_object() else {
+            return out;
+        };
+        for (k, v) in obj {
+            let is_missing = if v.is_null() {
+                true
+            } else if let Some(field_obj) = v.as_object() {
+                match field_obj.get("value") {
+                    Some(val) => val.is_null() || val.as_str().map(|s| s.trim().is_empty()).unwrap_or(false),
+                    None => false,
+                }
+            } else {
+                v.as_str().map(|s| s.trim().is_empty()).unwrap_or(false)
+            };
+            if is_missing {
+                out.push(k.clone());
+            }
+        }
+        out
+    }
+
     fn combine_section_text(&self, section: &crate::models::section_model::SectionGroup) -> String {
         let mut parts = Vec::new();
 
@@ -416,11 +525,11 @@ impl StructuringService {
 - PreviousFunding: previous funding rounds
 - Investors: current investors"#
         } else {
-            return "Extract key-value pairs relevant to this section. Include numbers, dates, and important facts. If a value is not present, return null. Do not invent values.\n\nReturn a JSON object with the following top-level keys:\n- structured_data: A JSON OBJECT (NOT an array) where EACH KEY is the field name, and the value is an object: { \"value\": <value>, \"source_text\": \"<exact quote>\", \"slide_number\": <number>, \"confidence\": <float> }\n- summary: string (2–3 sentences)\n- signals: array of objects\n- red_flags: array of objects".to_string();
+            return "Extract key-value pairs relevant to this section. Include numbers, dates, and important facts. If a value is not present, return null. Do not invent values.\n\nReturn a JSON object with the following top-level keys:\n- structured_data: A JSON OBJECT (NOT an array) where EACH KEY is the field name, and the value is an object: { \"value\": <value>, \"source_text\": \"<exact quote>\", \"slide_number\": <number>, \"confidence\": <float> }\n- summary: string (2–3 sentences)\n- signals: array of objects\n- red_flags: array of objects with evidence_text and evidence_slide_number".to_string();
         };
 
         format!(
-            "{base}{null_rule}\n\nReturn a JSON object with the following top-level keys:\n- structured_data: A JSON OBJECT (NOT an array) where EACH KEY is the field name, and the value is an object: {{ \"value\": <value>, \"source_text\": \"<exact quote>\", \"slide_number\": <number>, \"confidence\": <float> }}\n- summary: string (2–3 sentences summarizing this section)\n- signals: array of objects {{ \"type\": string, \"description\": \"<verbatim quote>\", \"confidence\": number }}\n- red_flags: array of objects {{ \"type\": string, \"description\": \"<verbatim quote>\", \"severity\": \"low\" | \"medium\" | \"high\" | \"critical\" }}",
+            "{base}{null_rule}\n\nReturn a JSON object with the following top-level keys:\n- structured_data: A JSON OBJECT (NOT an array) where EACH KEY is the field name, and the value is an object: {{ \"value\": <value>, \"source_text\": \"<exact quote>\", \"slide_number\": <number>, \"confidence\": <float> }}\n- summary: string (2–3 sentences summarizing this section)\n- signals: array of objects {{ \"type\": string, \"description\": \"<verbatim quote>\", \"confidence\": number }}\n- red_flags: array of objects {{ \"type\": string, \"description\": \"<verbatim quote>\", \"severity\": \"low\" | \"medium\" | \"high\" | \"critical\", \"evidence_text\": \"<exact supporting quote>\", \"evidence_slide_number\": <number> }}",
             base = base,
             null_rule = NULL_RULE
         )
