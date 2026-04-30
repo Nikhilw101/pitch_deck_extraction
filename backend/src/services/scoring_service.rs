@@ -11,6 +11,7 @@
 
 use crate::models::structured_output::{RedFlag, ScoreBreakdown, StructuredSectionData};
 use crate::utils::regex_utils::normalize_to_base;
+use std::collections::HashSet;
 use tracing::debug;
 
 // ── Weight constants ──────────────────────────────────────────────────────────
@@ -96,6 +97,14 @@ pub fn check_thresholds(sections: &mut [StructuredSectionData]) -> (f32, Vec<Red
                             description: msg,
                             severity: "critical".to_string(),
                             section: section.section_name.clone(),
+                            evidence_text: Some(format!(
+                                "Rule-based proof: burn ({:.0}/mo) > 2x monthly revenue ({:.0}/mo)",
+                                b, monthly_rev
+                            )),
+                            evidence_slide_number: None,
+                            evidence_confirmed: Some(true),
+                            source: Some("rule_engine".to_string()),
+                            reason_details: Some("Burn rate threshold rule triggered.".to_string()),
                         });
                         penalty = (penalty + 0.40).min(1.0);
                     }
@@ -109,6 +118,14 @@ pub fn check_thresholds(sections: &mut [StructuredSectionData]) -> (f32, Vec<Red
                         description: msg,
                         severity: "critical".to_string(),
                         section: section.section_name.clone(),
+                        evidence_text: Some(format!(
+                            "Rule-based proof: extracted runway value is {:.0} months (< 6)",
+                            r
+                        )),
+                        evidence_slide_number: None,
+                        evidence_confirmed: Some(true),
+                        source: Some("rule_engine".to_string()),
+                        reason_details: Some("Runway threshold rule triggered.".to_string()),
                     });
                     penalty = (penalty + 0.30).min(1.0);
                 }
@@ -123,6 +140,14 @@ pub fn check_thresholds(sections: &mut [StructuredSectionData]) -> (f32, Vec<Red
                         description: msg,
                         severity: "high".to_string(),
                         section: section.section_name.clone(),
+                        evidence_text: Some(format!(
+                            "Rule-based proof: extracted gross margin is {:.1}% (< -50%)",
+                            m
+                        )),
+                        evidence_slide_number: None,
+                        evidence_confirmed: Some(true),
+                        source: Some("rule_engine".to_string()),
+                        reason_details: Some("Gross margin threshold rule triggered.".to_string()),
                     });
                     penalty = (penalty + 0.25).min(1.0);
                 }
@@ -158,6 +183,14 @@ pub fn check_thresholds(sections: &mut [StructuredSectionData]) -> (f32, Vec<Red
                         description: msg,
                         severity: "high".to_string(),
                         section: section.section_name.clone(),
+                        evidence_text: Some(format!(
+                            "Rule-based proof: extracted growth rate is {:.1}% (< 0%)",
+                            g
+                        )),
+                        evidence_slide_number: None,
+                        evidence_confirmed: Some(true),
+                        source: Some("rule_engine".to_string()),
+                        reason_details: Some("Negative growth threshold rule triggered.".to_string()),
                     });
                     penalty = (penalty + 0.25).min(1.0);
                 }
@@ -176,6 +209,14 @@ pub fn check_thresholds(sections: &mut [StructuredSectionData]) -> (f32, Vec<Red
                         description: msg,
                         severity: "medium".to_string(),
                         section: section.section_name.clone(),
+                        evidence_text: Some(format!(
+                            "Rule-based proof: extracted TAM is ${:.0} (< $1,000,000)",
+                            t
+                        )),
+                        evidence_slide_number: None,
+                        evidence_confirmed: Some(true),
+                        source: Some("rule_engine".to_string()),
+                        reason_details: Some("Small TAM threshold rule triggered.".to_string()),
                     });
                     penalty = (penalty + 0.10).min(1.0);
                 }
@@ -194,6 +235,14 @@ pub fn check_thresholds(sections: &mut [StructuredSectionData]) -> (f32, Vec<Red
                         description: msg,
                         severity: "medium".to_string(),
                         section: section.section_name.clone(),
+                        evidence_text: Some(format!(
+                            "Rule-based proof: extracted funding ask is {:.0} (> $1,000,000,000)",
+                            a
+                        )),
+                        evidence_slide_number: None,
+                        evidence_confirmed: Some(true),
+                        source: Some("rule_engine".to_string()),
+                        reason_details: Some("Outsized funding ask threshold rule triggered.".to_string()),
                     });
                     penalty = (penalty + 0.10).min(1.0);
                 }
@@ -212,6 +261,14 @@ pub fn check_thresholds(sections: &mut [StructuredSectionData]) -> (f32, Vec<Red
                         description: msg,
                         severity: "medium".to_string(),
                         section: section.section_name.clone(),
+                        evidence_text: Some(format!(
+                            "Rule-based proof: extracted team size is {:.0} (< 2)",
+                            t
+                        )),
+                        evidence_slide_number: None,
+                        evidence_confirmed: Some(true),
+                        source: Some("rule_engine".to_string()),
+                        reason_details: Some("Small team size threshold rule triggered.".to_string()),
                     });
                     penalty = (penalty + 0.10).min(1.0);
                 }
@@ -313,6 +370,7 @@ pub fn calculate_overall_score(
     let validation_avg = sections.iter().map(|s| s.validation.score).sum::<f32>() / sections.len() as f32;
     let (threshold_score, new_flags) = check_thresholds(sections);
     existing_red_flags.extend(new_flags);
+    dedup_global_red_flags(existing_red_flags);
     let consistency = (validation_avg + threshold_score) / 2.0; // simple average of the two consistency metrics
 
     // 4. Web validation
@@ -338,4 +396,20 @@ pub fn calculate_overall_score(
         threshold_score,
         final_score,
     }
+}
+
+fn dedup_global_red_flags(flags: &mut Vec<RedFlag>) {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::with_capacity(flags.len());
+    for flag in flags.drain(..) {
+        let key = format!(
+            "{}|{}",
+            flag.flag_type.trim().to_lowercase(),
+            flag.description.trim().to_lowercase()
+        );
+        if seen.insert(key) {
+            deduped.push(flag);
+        }
+    }
+    *flags = deduped;
 }

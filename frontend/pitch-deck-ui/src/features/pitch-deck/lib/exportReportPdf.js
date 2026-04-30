@@ -10,6 +10,21 @@ function pushWrappedLine(doc, text, x, y, maxWidth, lineHeight) {
   return y + lines.length * lineHeight
 }
 
+function sourceLabel(source) {
+  switch (source) {
+    case 'llm_structuring':
+      return 'LLM Structuring'
+    case 'llm_signals':
+      return 'Signal Extractor'
+    case 'rule_engine':
+      return 'Rule Engine'
+    case 'derived_analysis':
+      return 'Derived Analysis'
+    default:
+      return source || 'Unknown'
+  }
+}
+
 export async function exportReportPdf({ report, payload }) {
   const { jsPDF } = await import('jspdf')
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
@@ -121,6 +136,50 @@ export async function exportReportPdf({ report, payload }) {
           margin + 12,
           y,
           contentWidth - 12,
+          lineHeight
+        )
+        if (flag?.evidence_text) {
+          y = pushWrappedLine(
+            doc,
+            `  Proof: "${flag.evidence_text}"`,
+            margin + 16,
+            y,
+            contentWidth - 16,
+            lineHeight
+          )
+        }
+        if (flag?.reason_details) {
+          y = pushWrappedLine(
+            doc,
+            `  Reason: ${flag.reason_details}`,
+            margin + 16,
+            y,
+            contentWidth - 16,
+            lineHeight
+          )
+        }
+        if (flag?.source) {
+          y = pushWrappedLine(
+            doc,
+            `  Source: ${sourceLabel(flag.source)}`,
+            margin + 16,
+            y,
+            contentWidth - 16,
+            lineHeight
+          )
+        }
+        const confirmation =
+          flag?.evidence_confirmed === true
+            ? 'Verified from source text'
+            : flag?.evidence_confirmed === false
+              ? 'Not verified from source text'
+              : 'Not available'
+        y = pushWrappedLine(
+          doc,
+          `  Confirmation: ${confirmation}${flag?.evidence_slide_number ? ` | Slide ${flag.evidence_slide_number}` : ''}`,
+          margin + 16,
+          y,
+          contentWidth - 16,
           lineHeight
         )
       })
